@@ -2,9 +2,18 @@
  * API client for the AEPP Planning Council & Classical Engine backend.
  */
 
-const API_BASE = 'http://localhost:8001';
+const API_BASE = '';
 
 export const api = {
+  async getModels() {
+    const response = await fetch(`${API_BASE}/api/models`);
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Failed to load available models');
+    }
+    return response.json();
+  },
+
   /**
    * Check status of classical planners (Fast Downward, VAL, Pyperplan).
    */

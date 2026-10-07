@@ -29,6 +29,8 @@ from .council import (
     stage3_synthesize_final,
     calculate_aggregate_rankings,
 )
+from .config import PLANNING_COUNCIL_ROLES, CHAIRMAN_MODEL
+from .openrouter import get_model_catalog
 
 app = FastAPI(title="LLM Council API - AEPP Platform")
 
@@ -57,6 +59,42 @@ class SolvePDDLRequest(BaseModel):
     domain_pddl: str
     problem_pddl: str
     user_constraints: Optional[Dict[str, Any]] = None
+
+
+ROLE_MODEL_KEYS = ("optimal", "satisficing", "agile", "judge")
+
+
+async def resolve_role_models(user_constraints: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """Validate optional frontend model overrides against OpenRouter's catalog."""
+    if not user_constraints or "models" not in user_constraints:
+        return None
+
+    requested = user_constraints["models"]
+    if not isinstance(requested, dict):
+        raise HTTPException(status_code=400, detail="models must be an object keyed by council role.")
+
+    overrides: Dict[str, str] = {}
+    for role in ROLE_MODEL_KEYS:
+        if role in requested:
+            value = requested[role]
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(status_code=400, detail=f"Model override for '{role}' must be a non-empty string.")
+            overrides[role] = value.strip()
+
+    unknown_roles = set(requested) - set(ROLE_MODEL_KEYS)
+    if unknown_roles:
+        raise HTTPException(status_code=400, detail=f"Unknown model role(s): {', '.join(sorted(unknown_roles))}.")
+
+    try:
+        catalog = await get_model_catalog()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Unable to load the OpenRouter model catalog.") from exc
+
+    available_ids = {model["id"] for model in catalog}
+    invalid = sorted(set(overrides.values()) - available_ids)
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Unknown OpenRouter model ID(s): {', '.join(invalid)}.")
+    return overrides
 
 
 class ConversationMetadata(BaseModel):
@@ -101,6 +139,23 @@ async def get_telemetry_history(limit: int = 50, problem_name: Optional[str] = N
     return {"records": records, "count": len(records)}
 
 
+@app.get("/api/models")
+async def get_models():
+    """Return the searchable OpenRouter model catalog."""
+    try:
+        return {
+            "models": await get_model_catalog(),
+            "defaults": {
+                "optimal": PLANNING_COUNCIL_ROLES["optimal"]["model"],
+                "satisficing": PLANNING_COUNCIL_ROLES["satisficing"]["model"],
+                "agile": PLANNING_COUNCIL_ROLES["agile"]["model"],
+                "judge": CHAIRMAN_MODEL,
+            },
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Unable to load the OpenRouter model catalog.") from exc
+
+
 @app.post("/api/solve-pddl")
 async def solve_pddl_pipeline(request: SolvePDDLRequest):
     """Full Orchestrator Pipeline for Explainable AI Planning:
@@ -117,6 +172,7 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
         raise HTTPException(status_code=400, detail="Domain PDDL content cannot be empty.")
     if not request.problem_pddl.strip():
         raise HTTPException(status_code=400, detail="Problem PDDL content cannot be empty.")
+    role_models = await resolve_role_models(request.user_constraints)
 
     # Step 1: Structural Analysis
     metrics = extract_metrics(request.domain_pddl, request.problem_pddl)
@@ -129,6 +185,7 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
         user_query=task_desc,
         domain_text=request.domain_pddl,
         problem_text=request.problem_pddl,
+        role_models=role_models,
     )
 
     decision = stage3_result.get("decision", {})

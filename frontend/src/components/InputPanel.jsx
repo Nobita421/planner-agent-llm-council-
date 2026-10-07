@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SAMPLE_PRESETS } from '../presets';
+import { api } from '../api';
 
 export default function InputPanel({
   domainPDDL,
@@ -12,7 +13,53 @@ export default function InputPanel({
   const [selectedPresetId, setSelectedPresetId] = useState('blocksworld-sussman');
   const [maxTime, setMaxTime] = useState(60);
   const [forceStrategy, setForceStrategy] = useState('auto');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [models, setModels] = useState([]);
+  const [modelDefaults, setModelDefaults] = useState({});
+  const [selectedModels, setSelectedModels] = useState({});
+  const [modelSearch, setModelSearch] = useState('');
+  const [modelError, setModelError] = useState(null);
+  const [modelsLoading, setModelsLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    api.getModels()
+      .then((data) => {
+        if (!active) return;
+        const availableModels = data.models || [];
+        const availableIds = new Set(availableModels.map((model) => model.id));
+        const availableDefaults = Object.fromEntries(
+          Object.entries(data.defaults || {}).filter(([, modelId]) => availableIds.has(modelId)),
+        );
+        setModels(availableModels);
+        setModelDefaults(availableDefaults);
+        setSelectedModels(availableDefaults);
+      })
+      .catch((err) => {
+        if (active) setModelError(err.message);
+      })
+      .finally(() => {
+        if (active) setModelsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const filteredModels = useMemo(() => {
+    const query = modelSearch.trim().toLowerCase();
+    return !query ? models : models.filter((model) => (
+      model.id.toLowerCase().includes(query)
+      || model.name.toLowerCase().includes(query)
+      || model.provider.toLowerCase().includes(query)
+    ));
+  }, [modelSearch, models]);
+
+  const roleLabels = {
+    optimal: 'Optimal Agent',
+    satisficing: 'Satisficing Agent',
+    agile: 'Agile Agent',
+    judge: 'Judge / Chairman',
+  };
 
   const handlePresetSelect = (presetId) => {
     setSelectedPresetId(presetId);
@@ -32,6 +79,9 @@ export default function InputPanel({
     };
     if (forceStrategy !== 'auto') {
       constraints.force_strategy = forceStrategy;
+    }
+    if (Object.keys(selectedModels).length === 4) {
+      constraints.models = selectedModels;
     }
 
     onRunPlanning(constraints);
@@ -71,6 +121,56 @@ export default function InputPanel({
             <div className="editor-header">
               <span className="editor-title">Domain PDDL</span>
               <span className="editor-subtext">(Types, Predicates, Actions)</span>
+            </div>
+
+            <div className="model-selection-panel">
+              <div className="editor-header">
+                <span className="editor-title">Council Models</span>
+                <span className="editor-subtext">Separate role selectors with backend override support</span>
+              </div>
+              <input
+                className="model-search-input"
+                type="search"
+                value={modelSearch}
+                onChange={(e) => setModelSearch(e.target.value)}
+                placeholder="Search models by name, provider, or ID..."
+                disabled={isLoading || modelsLoading}
+              />
+              {modelsLoading && <p className="model-status">Loading OpenRouter models...</p>}
+              {modelError && <p className="model-status model-error">{modelError}</p>}
+              {!modelsLoading && !modelError && (
+                <div className="model-selectors-grid">
+                  {Object.entries(roleLabels).map(([role, label]) => (
+                    <label className="control-item" htmlFor={`model-${role}`} key={role}>
+                      <span className="control-label">{label}</span>
+                      <select
+                        id={`model-${role}`}
+                        className="control-select"
+                        value={selectedModels[role] || modelDefaults[role] || ''}
+                        onChange={(e) => setSelectedModels((current) => ({
+                          ...current,
+                          [role]: e.target.value,
+                        }))}
+                        disabled={isLoading || modelsLoading}
+                      >
+                        {[
+                          ...(
+                            selectedModels[role]
+                            && !filteredModels.some((model) => model.id === selectedModels[role])
+                            ? models.filter((model) => model.id === selectedModels[role])
+                            : []
+                          ),
+                          ...filteredModels,
+                        ].map((model) => (
+                          <option value={model.id} key={model.id}>
+                            {model.name} ({model.id})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
             <textarea
               className="pddl-textarea"

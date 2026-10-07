@@ -1,8 +1,59 @@
 """OpenRouter API client for making LLM requests."""
 
 import httpx
+import time
 from typing import List, Dict, Any, Optional
 from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+MODEL_CATALOG_TTL_SECONDS = 300.0
+_model_catalog: Optional[List[Dict[str, Any]]] = None
+_model_catalog_loaded_at = 0.0
+
+
+def _normalize_model(model: Dict[str, Any]) -> Dict[str, Any]:
+    model_id = str(model.get("id", "")).strip()
+    name = str(model.get("name") or model_id).strip()
+    provider = model_id.split("/", 1)[0] if "/" in model_id else ""
+    return {
+        "id": model_id,
+        "name": name,
+        "provider": provider,
+        "context_length": model.get("context_length"),
+        "pricing": model.get("pricing", {}),
+    }
+
+
+async def get_model_catalog(force_refresh: bool = False) -> List[Dict[str, Any]]:
+    """Return the cached OpenRouter model catalog, refreshing it when expired."""
+    global _model_catalog, _model_catalog_loaded_at
+    now = time.monotonic()
+    if _model_catalog is not None and not force_refresh and now - _model_catalog_loaded_at < MODEL_CATALOG_TTL_SECONDS:
+        return _model_catalog
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(OPENROUTER_MODELS_URL)
+            response.raise_for_status()
+            payload = response.json()
+            models = payload.get("data")
+            if not isinstance(models, list):
+                raise ValueError("OpenRouter model catalog response did not contain a data list")
+            normalized = []
+            for model in models:
+                normalized_model = _normalize_model(model)
+                if normalized_model["id"]:
+                    normalized.append(normalized_model)
+            if not normalized:
+                raise ValueError("OpenRouter model catalog was empty")
+            _model_catalog = normalized
+            _model_catalog_loaded_at = now
+            return normalized
+    except Exception:
+        if _model_catalog is not None:
+            print("Failed to refresh OpenRouter model catalog; using stale cache.")
+            return _model_catalog
+        raise
 
 
 async def query_model(
@@ -22,9 +73,10 @@ async def query_model(
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
     }
+    if OPENROUTER_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
 
     payload = {
         "model": model,

@@ -165,10 +165,21 @@ Submits a domain and problem PDDL pair to the council and execution pipeline.
   "problem_pddl": "(define (problem ...))",
   "user_constraints": {
     "max_time": 30.0,
-    "force_strategy": null
+    "force_strategy": null,
+    "models": {
+      "optimal": "provider/model-id",
+      "satisficing": "provider/model-id",
+      "agile": "provider/model-id",
+      "judge": "provider/model-id"
+    }
   }
 }
 ```
+
+The optional `models` object assigns separate OpenRouter models to the
+Optimal, Satisficing, Agile, and Judge council roles. Model IDs should be
+selected from `GET /api/models`. If omitted, the backend uses the models
+configured by environment variables.
 
 **Response:**
 ```json
@@ -180,11 +191,12 @@ Submits a domain and problem PDDL pair to the council and execution pipeline.
     "actions_count": 3,
     "goals_count": 2
   },
-  "council": {
+  "debate": {
     "stage1": [...],
     "stage2": [...],
-    "stage3": {
-      "raw_text": "...",
+    "aggregate_rankings": [...],
+    "judge_verdict": {
+      "response": "...",
       "decision": {
         "strategy": "satisficing",
         "budget_seconds": 30.0,
@@ -194,24 +206,39 @@ Submits a domain and problem PDDL pair to the council and execution pipeline.
     }
   },
   "execution": {
-    "success": true,
+    "initial_strategy": "satisficing",
+    "final_strategy": "satisficing",
+    "fallback_triggered": false,
+    "fallback_history": [],
     "plan": ["(pick ball1 rooma left)", "(move rooma roomb)", "(drop ball1 roomb left)"],
     "execution_time": 0.012,
     "planner_used": "pyperplan",
-    "final_strategy": "satisficing",
-    "fallback_triggered": false,
-    "fallback_history": []
+    "cost": 3.0,
+    "error": null
   },
   "validation": {
     "valid": true,
     "cost": 3.0,
-    "validator_used": "state_transition_validator"
-  }
+    "plan": ["(pick ball1 rooma left)", "(move rooma roomb)", "(drop ball1 roomb left)"],
+    "execution_time": 0.012,
+    "error": null
+  },
+  "xai_summary": "Problem scale warrants fast heuristic search.",
+  "telemetry_id": 1
 }
 ```
 
+If `OPENROUTER_API_KEY` is configured, the council uses live models through
+OpenRouter. If it is omitted, model requests use the platform's built-in
+offline fallback responses.
+
 ### `GET /api/telemetry?limit=50`
 Returns historical planning runs stored in SQLite (`backend/telemetry.db`).
+
+### `GET /api/models`
+Returns the current OpenRouter model catalog for searchable frontend role
+selectors. The backend caches the catalog briefly and includes the configured
+default model ID for each council role.
 
 ### `GET /api/pddl-status`
 Returns planner and validator availability (Fast Downward, Pyperplan, VAL binary).

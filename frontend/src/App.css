@@ -314,6 +314,56 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 
+.model-selection-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.model-search-input {
+  width: 100%;
+  background: #080d19;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: #f1f5f9;
+  padding: 9px 12px;
+  font-size: 0.85rem;
+}
+
+.model-search-input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+}
+
+.model-selectors-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.model-selectors-grid .control-item {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-selectors-grid .control-select {
+  width: 100%;
+}
+
+.model-status {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.model-error {
+  color: #fca5a5;
+}
+
 .panel-footer {
   display: flex;
   justify-content: space-between;
@@ -356,6 +406,12 @@
 
 .control-select:focus {
   border-color: #38bdf8;
+}
+
+@media (max-width: 760px) {
+  .model-selectors-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .run-button {

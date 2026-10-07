@@ -269,6 +269,7 @@ async def stage1_collect_responses(
     user_query: str,
     domain_text: str = "",
     problem_text: str = "",
+    role_models: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Stage 1: Collect tailored strategy arguments from the 3 specialized planning agents.
 
@@ -282,7 +283,7 @@ async def stage1_collect_responses(
 
     for role_id in roles:
         role_cfg = PLANNING_COUNCIL_ROLES[role_id]
-        model = role_cfg["model"]
+        model = (role_models or {}).get(role_id, role_cfg["model"])
         prompt = _build_stage1_prompt_for_role(role_id, context)
         messages = [
             {"role": "system", "content": f"You are the {role_cfg['name']}. {role_cfg['description']}"},
@@ -412,6 +413,7 @@ async def stage2_collect_rankings(
     stage1_results: List[Dict[str, Any]],
     domain_text: str = "",
     problem_text: str = "",
+    role_models: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """Stage 2: Each planning agent critiques the others and produces a ranked evaluation."""
     context = prepare_planning_context(user_query, domain_text, problem_text)
@@ -427,7 +429,7 @@ async def stage2_collect_rankings(
     tasks = []
 
     for idx, role_id in enumerate(roles):
-        model = PLANNING_COUNCIL_ROLES[role_id]["model"]
+        model = (role_models or {}).get(role_id, PLANNING_COUNCIL_ROLES[role_id]["model"])
         prompt = _build_stage2_peer_review_prompt(context, stage1_results, role_id)
         messages = [
             {"role": "system", "content": f"You are the {PLANNING_COUNCIL_ROLES[role_id]['name']} reviewing peer proposals."},
@@ -449,7 +451,7 @@ async def stage2_collect_rankings(
         stage2_results.append({
             "role": role_id,
             "agent_name": role_cfg["name"],
-            "model": role_cfg["model"],
+            "model": (role_models or {}).get(role_id, role_cfg["model"]),
             "ranking": full_text,
             "parsed_ranking": parsed,
         })
@@ -646,6 +648,7 @@ async def stage3_synthesize_final(
     stage2_results: List[Dict[str, Any]],
     domain_text: str = "",
     problem_text: str = "",
+    role_models: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Stage 3: Chairman synthesizes final answer and produces explainable decision with strict JSON."""
     context = prepare_planning_context(user_query, domain_text, problem_text)
@@ -656,7 +659,8 @@ async def stage3_synthesize_final(
         {"role": "user", "content": prompt},
     ]
 
-    response = await query_model(CHAIRMAN_MODEL, messages, timeout=90.0)
+    judge_model = (role_models or {}).get("judge", CHAIRMAN_MODEL)
+    response = await query_model(judge_model, messages, timeout=90.0)
 
     if response and response.get("content"):
         full_text = response["content"]
@@ -666,7 +670,7 @@ async def stage3_synthesize_final(
     decision = parse_judge_decision(full_text)
 
     return {
-        "model": CHAIRMAN_MODEL,
+        "model": judge_model,
         "agent_name": JUDGE_ROLE["name"],
         "response": full_text,
         "decision": decision,
@@ -758,14 +762,15 @@ async def run_full_council(
     user_query: str,
     domain_text: str = "",
     problem_text: str = "",
+    role_models: Optional[Dict[str, str]] = None,
 ) -> Tuple[List, List, Dict, Dict]:
     """Run the complete 3-stage AI planning council process."""
     # Stage 1: Collect individual arguments from the 3 specialized agents
-    stage1_results = await stage1_collect_responses(user_query, domain_text, problem_text)
+    stage1_results = await stage1_collect_responses(user_query, domain_text, problem_text, role_models)
 
     # Stage 2: Peer reviews and ranking
     stage2_results, label_to_model = await stage2_collect_rankings(
-        user_query, stage1_results, domain_text, problem_text
+        user_query, stage1_results, domain_text, problem_text, role_models
     )
 
     # Calculate aggregate rankings
@@ -773,7 +778,7 @@ async def run_full_council(
 
     # Stage 3: Judge synthesizes final explainable verdict
     stage3_result = await stage3_synthesize_final(
-        user_query, stage1_results, stage2_results, domain_text, problem_text
+        user_query, stage1_results, stage2_results, domain_text, problem_text, role_models
     )
 
     # Prepare metadata with planning decision
