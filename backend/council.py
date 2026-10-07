@@ -305,7 +305,7 @@ async def stage1_collect_responses(
         stage1_results.append({
             "role": role_id,
             "agent_name": role_cfg["name"],
-            "model": role_cfg["model"],
+            "model": model,
             "response": content,
         })
 

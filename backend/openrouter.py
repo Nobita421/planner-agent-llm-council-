@@ -100,8 +100,12 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text[:240].replace("\n", " ")
+        print(f"OpenRouter rejected model {model} with HTTP {e.response.status_code}: {detail}")
+        return None
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
+        print(f"OpenRouter request failed for model {model}: {e}")
         return None
 
 

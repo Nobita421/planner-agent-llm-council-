@@ -19,7 +19,7 @@ PLANNING_COUNCIL_ROLES = {
             "lower-bound estimates, and detects whether problem state space permits optimal "
             "search within memory/time bounds."
         ),
-        "model": os.getenv("OPTIMAL_AGENT_MODEL", "openai/gpt-5.1"),
+        "model": os.getenv("OPTIMAL_AGENT_MODEL", "nvidia/nemotron-3.5-lightning:free"),
         "preferred_heuristics": ["lmcut", "merge_and_shrink", "blind"],
         "default_budget": 120,
     },
@@ -31,7 +31,7 @@ PLANNING_COUNCIL_ROLES = {
             "Specializes in heuristic search trade-offs, LAMA, multi-heuristic search, "
             "goal count relaxation, and balancing plan cost vs runtime."
         ),
-        "model": os.getenv("SATISFICING_AGENT_MODEL", "anthropic/claude-sonnet-4.5"),
+        "model": os.getenv("SATISFICING_AGENT_MODEL", "openrouter/free"),
         "preferred_heuristics": ["lama", "hff", "cea", "hadd"],
         "default_budget": 60,
     },
@@ -43,7 +43,7 @@ PLANNING_COUNCIL_ROLES = {
             "Specializes in fast first-plan discovery, satisfiability under tight deadlines, "
             "greedy search, and emergency plan synthesis."
         ),
-        "model": os.getenv("AGILE_AGENT_MODEL", "google/gemini-3-pro-preview"),
+        "model": os.getenv("AGILE_AGENT_MODEL", "nvidia/nemotron-3.5-lightning:free"),
         "preferred_heuristics": ["lazy_greedy", "bfs", "unit_cost"],
         "default_budget": 15,
     },
@@ -57,7 +57,7 @@ JUDGE_ROLE = {
         "The chairman that evaluates the three arguments based on problem characteristics "
         "(objects, predicates, branching factor) and makes the final planner strategy choice."
     ),
-    "model": os.getenv("CHAIRMAN_MODEL", "google/gemini-3-pro-preview"),
+    "model": os.getenv("CHAIRMAN_MODEL", "openrouter/free"),
 }
 
 # Council models list for backwards compatibility

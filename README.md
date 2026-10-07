@@ -179,7 +179,10 @@ Submits a domain and problem PDDL pair to the council and execution pipeline.
 The optional `models` object assigns separate OpenRouter models to the
 Optimal, Satisficing, Agile, and Judge council roles. Model IDs should be
 selected from `GET /api/models`. If omitted, the backend uses the models
-configured by environment variables.
+configured by environment variables, or the built-in free-model defaults.
+Paid model IDs require an OpenRouter account with available credits; if
+OpenRouter rejects a request, the backend logs the HTTP status and uses its
+domain-aware fallback response.
 
 **Response:**
 ```json
@@ -230,7 +233,9 @@ configured by environment variables.
 
 If `OPENROUTER_API_KEY` is configured, the council uses live models through
 OpenRouter. If it is omitted, model requests use the platform's built-in
-offline fallback responses.
+offline fallback responses. A configured key does not guarantee a live
+response: OpenRouter may reject a paid, unavailable, or rate-limited model
+with HTTP 402, 404, or 429, respectively.
 
 ### `GET /api/telemetry?limit=50`
 Returns historical planning runs stored in SQLite (`backend/telemetry.db`).
