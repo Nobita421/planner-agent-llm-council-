@@ -1,201 +1,138 @@
-import { useState, useEffect } from 'react';
-import Sidebar from './components/Sidebar';
-import ChatInterface from './components/ChatInterface';
+import React, { useState, useEffect } from 'react';
+import Header from './components/Header';
+import InputPanel from './components/InputPanel';
+import StructuralMetricsPill from './components/StructuralMetricsPill';
+import CouncilReview from './components/CouncilReview';
+import ExecutionVerdictCard from './components/ExecutionVerdictCard';
+import PlanInspector from './components/PlanInspector';
+import TelemetryDrawer from './components/TelemetryDrawer';
+import { SAMPLE_PRESETS } from './presets';
 import { api } from './api';
 import './App.css';
 
-function App() {
-  const [conversations, setConversations] = useState([]);
-  const [currentConversationId, setCurrentConversationId] = useState(null);
-  const [currentConversation, setCurrentConversation] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+export default function App() {
+  const [activeTab, setActiveTab] = useState('studio');
+  const [domainPDDL, setDomainPDDL] = useState(SAMPLE_PRESETS[0].domain);
+  const [problemPDDL, setProblemPDDL] = useState(SAMPLE_PRESETS[0].problem);
 
-  // Load conversations on mount
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusInfo, setStatusInfo] = useState(null);
+  const [planningResult, setPlanningResult] = useState(null);
+  const [telemetryCount, setTelemetryCount] = useState(0);
+  const [errorMessage, setErrorMessage] = useState(null);
+
   useEffect(() => {
-    loadConversations();
+    loadInitialStatus();
   }, []);
 
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
-    }
-  }, [currentConversationId]);
-
-  const loadConversations = async () => {
+  const loadInitialStatus = async () => {
     try {
-      const convs = await api.listConversations();
-      setConversations(convs);
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
+      const status = await api.getPDDLStatus();
+      setStatusInfo(status);
+    } catch (err) {
+      console.warn('Backend status check pending:', err);
     }
-  };
 
-  const loadConversation = async (id) => {
     try {
-      const conv = await api.getConversation(id);
-      setCurrentConversation(conv);
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
+      const telem = await api.getTelemetry(1);
+      setTelemetryCount(telem.count || 0);
+    } catch (err) {
+      console.warn('Telemetry fetch pending:', err);
     }
   };
 
-  const handleNewConversation = async () => {
-    try {
-      const newConv = await api.createConversation();
-      setConversations([
-        { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
-        ...conversations,
-      ]);
-      setCurrentConversationId(newConv.id);
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-    }
-  };
-
-  const handleSelectConversation = (id) => {
-    setCurrentConversationId(id);
-  };
-
-  const handleSendMessage = async (content) => {
-    if (!currentConversationId) return;
-
+  const handleRunPlanning = async (constraints) => {
     setIsLoading(true);
+    setErrorMessage(null);
+
     try {
-      // Optimistically add user message to UI
-      const userMessage = { role: 'user', content };
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, userMessage],
-      }));
+      const result = await api.solvePDDL(domainPDDL, problemPDDL, constraints);
+      setPlanningResult(result);
+      setTelemetryCount((prev) => prev + 1);
 
-      // Create a partial assistant message that will be updated progressively
-      const assistantMessage = {
-        role: 'assistant',
-        stage1: null,
-        stage2: null,
-        stage3: null,
-        metadata: null,
-        loading: {
-          stage1: false,
-          stage2: false,
-          stage3: false,
-        },
-      };
-
-      // Add the partial assistant message
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, assistantMessage],
-      }));
-
-      // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
-        switch (eventType) {
-          case 'stage1_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage1_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage3_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage3_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'title_complete':
-            // Reload conversations to get updated title
-            loadConversations();
-            break;
-
-          case 'complete':
-            // Stream complete, reload conversations list
-            loadConversations();
-            setIsLoading(false);
-            break;
-
-          case 'error':
-            console.error('Stream error:', event.message);
-            setIsLoading(false);
-            break;
-
-          default:
-            console.log('Unknown event type:', eventType);
+      // Scroll smoothly down to results
+      setTimeout(() => {
+        const resultsEl = document.getElementById('planning-results-anchor');
+        if (resultsEl) {
+          resultsEl.scrollIntoView({ behavior: 'smooth' });
         }
-      });
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: prev.messages.slice(0, -2),
-      }));
+      }, 100);
+    } catch (err) {
+      console.error('Planning pipeline error:', err);
+      setErrorMessage(err.message || 'An error occurred during planning deliberation.');
+    } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="app">
-      <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
+    <div className="aepp-app-root">
+      <Header
+        statusInfo={statusInfo}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        telemetryCount={telemetryCount}
       />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-      />
+
+      <main className="aepp-main-content">
+        {activeTab === 'studio' ? (
+          <div className="studio-workspace">
+            {/* Input Panel */}
+            <InputPanel
+              domainPDDL={domainPDDL}
+              setDomainPDDL={setDomainPDDL}
+              problemPDDL={problemPDDL}
+              setProblemPDDL={setProblemPDDL}
+              onRunPlanning={handleRunPlanning}
+              isLoading={isLoading}
+            />
+
+            {/* Error Notification */}
+            {errorMessage && (
+              <div className="pipeline-error-banner">
+                <span className="error-icon">⚠️</span>
+                <div className="error-content">
+                  <h4>Planning Pipeline Execution Issue</h4>
+                  <p>{errorMessage}</p>
+                </div>
+                <button className="error-dismiss" onClick={() => setErrorMessage(null)}>✕</button>
+              </div>
+            )}
+
+            {/* Planning Results Anchor */}
+            <div id="planning-results-anchor" />
+
+            {/* Planning Results Display */}
+            {planningResult && (
+              <div className="results-container">
+                {/* Structural Analysis Header */}
+                <StructuralMetricsPill metrics={planningResult.metrics} />
+
+                {/* Step 2: 3-Way Council Review & Peer Critique */}
+                <CouncilReview debate={planningResult.debate} />
+
+                {/* Step 3 & 4: Judge Verdict Banner & Live Metrics */}
+                <ExecutionVerdictCard
+                  judgeVerdict={planningResult.debate?.judge_verdict}
+                  execution={planningResult.execution}
+                  validation={planningResult.validation}
+                  xaiSummary={planningResult.xai_summary}
+                />
+
+                {/* Step 5: Sequential Solution Plan Inspector */}
+                <PlanInspector
+                  plan={planningResult.execution?.plan}
+                  cost={planningResult.validation?.cost}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="telemetry-workspace">
+            <TelemetryDrawer />
+          </div>
+        )}
+      </main>
     </div>
   );
 }
-
-export default App;

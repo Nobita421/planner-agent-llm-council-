@@ -1,12 +1,62 @@
 /**
- * API client for the LLM Council backend.
+ * API client for the AEPP Planning Council & Classical Engine backend.
  */
 
 const API_BASE = 'http://localhost:8001';
 
 export const api = {
   /**
-   * List all conversations.
+   * Check status of classical planners (Fast Downward, VAL, Pyperplan).
+   */
+  async getPDDLStatus() {
+    const response = await fetch(`${API_BASE}/api/pddl-status`);
+    if (!response.ok) {
+      throw new Error('Failed to retrieve planner status');
+    }
+    return response.json();
+  },
+
+  /**
+   * Run full AEPP Planning Pipeline:
+   * Analysis -> 3-Stage Council Debate -> Planner Execution -> Validation -> Fallback -> Telemetry.
+   */
+  async solvePDDL(domainPDDL, problemPDDL, userConstraints = null) {
+    const response = await fetch(`${API_BASE}/api/solve-pddl`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        domain_pddl: domainPDDL,
+        problem_pddl: problemPDDL,
+        user_constraints: userConstraints,
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Failed to solve PDDL planning problem');
+    }
+    return response.json();
+  },
+
+  /**
+   * Retrieve historical planning telemetry records.
+   */
+  async getTelemetry(limit = 50, problemName = null) {
+    let url = `${API_BASE}/api/telemetry?limit=${limit}`;
+    if (problemName) {
+      url += `&problem_name=${encodeURIComponent(problemName)}`;
+    }
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Failed to fetch telemetry records');
+    }
+    return response.json();
+  },
+
+  /**
+   * List all conversations (legacy chat support).
    */
   async listConversations() {
     const response = await fetch(`${API_BASE}/api/conversations`);
@@ -37,9 +87,7 @@ export const api = {
    * Get a specific conversation.
    */
   async getConversation(conversationId) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
-    );
+    const response = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
     if (!response.ok) {
       throw new Error('Failed to get conversation');
     }
@@ -50,66 +98,16 @@ export const api = {
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
-      }
-    );
+    const response = await fetch(`${API_BASE}/api/conversations/${conversationId}/message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content }),
+    });
     if (!response.ok) {
       throw new Error('Failed to send message');
     }
     return response.json();
-  },
-
-  /**
-   * Send a message and receive streaming updates.
-   * @param {string} conversationId - The conversation ID
-   * @param {string} content - The message content
-   * @param {function} onEvent - Callback function for each event: (eventType, data) => void
-   * @returns {Promise<void>}
-   */
-  async sendMessageStream(conversationId, content, onEvent) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error('Failed to send message');
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
-          }
-        }
-      }
-    }
   },
 };

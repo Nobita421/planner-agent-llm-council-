@@ -1,24 +1,70 @@
-# LLM Council
+# Agentic Explainable Planning Platform (AEPP)
 
 ![llmcouncil](header.jpg)
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+The **Agentic Explainable Planning Platform (AEPP)** combines multi-agent LLM council deliberation with classical automated planning engines (Fast Downward, Pyperplan) and state-transition validation. Instead of treating planning as an opaque black box or relying purely on LLM hallucination for action sequences, AEPP leverages specialized AI agents to analyze problem complexity, debate algorithmic search strategies, execute classical solvers, validate plans against formal PDDL semantics, and autonomously recover from solver failures.
 
-In a bit more detail, here is what happens when you submit a query:
+---
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+## 🚀 Key Features
 
-## Vibe Code Alert
+1. **Multi-Agent Deliberation Council**:
+   - **Optimal Agent**: Specializes in $A^*$ search, admissible heuristics (LM-Cut, Merge-and-Shrink), optimality bounds, and state-space combinatorial analysis.
+   - **Satisficing Agent**: Advocates for heuristic search trade-offs, LAMA, multi-heuristic search, and balancing plan cost against search time.
+   - **Agile Agent**: Prioritizes fast first-plan discovery, greedy best-first search, and satisfiability under tight computational deadlines.
+   - **Judge / Chairman**: Synthesizes the debate, analyzes problem structural metrics, and renders a structured verdict in strict JSON with an Explainable AI (XAI) rationale.
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+2. **PDDL Structural Analysis**:
+   - Fast recursive S-expression parser extracting object counts, predicates, actions, goal predicates, and detecting numeric fluents / action costs.
 
-## Setup
+3. **Planners & Execution Profiles**:
+   - **Optimal**: $A^*$ search with admissible heuristics.
+   - **Satisficing**: Heuristic search with sub-optimal trade-offs (e.g. LAMA / Lazy Greedy).
+   - **Agile**: Sub-second / tight-deadline greedy search.
+   - Seamlessly executes native **Fast Downward** when present, falls back to embedded **Pyperplan**, or invokes adaptive mock synthesis.
 
-### 1. Install Dependencies
+4. **Plan Validation Engine**:
+   - Validates generated action plans against formal PDDL domain physics.
+   - Supports external `validate` (VAL) binary with automatic fallback to an internal, zero-dependency **pure-Python state-transition validator**.
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
+5. **Autonomous Fallback Ladder**:
+   - If a primary planner configuration fails (e.g., timeout, memory limit, or unachievable state), the platform automatically cascades through:
+     $$\text{Optimal} \longrightarrow \text{Satisficing} \longrightarrow \text{Agile} \longrightarrow \text{Mock Recovery}$$
+   - Telemetry tracks whether fallback was triggered and records full recovery history.
+
+6. **SQLite Telemetry Engine**:
+   - Automatically logs solver executions, plan length, metric footprints, validation status, and XAI verdicts to `backend/telemetry.db`.
+
+7. **Modern React Dashboard**:
+   - Side-by-side agent debate cards and anonymized peer critique matrix.
+   - Interactive PDDL editor preloaded with canonical IPC benchmarks.
+   - Step-by-step Plan Inspector with action sequencing and validation badges.
+   - Telemetry Drawer displaying solver execution history and fallback rates.
+
+---
+
+## 🏛 Canonical IPC Benchmarks (`benchmarks/`)
+
+The repository includes canonical benchmark domains from the International Planning Competition (IPC) in `benchmarks/`:
+
+| Domain | Description | Simple Problem | Complex Problem |
+| :--- | :--- | :--- | :--- |
+| **`blocksworld`** | Classic combinatorial block stacking | `prob01_simple.pddl` (3-blocks Sussman Anomaly) | `prob02_complex.pddl` (6-blocks Stack) |
+| **`gripper`** | Multi-gripper robot ball transport | `prob01_simple.pddl` (2 rooms, 2 balls) | `prob02_complex.pddl` (2 rooms, 6 balls) |
+| **`logistics`** | Multi-agent logistics (trucks, airplanes, airports) | `prob01_simple.pddl` (1 city, 1 truck, 1 package) | `prob02_complex.pddl` (2 cities, airplanes, 2 packages) |
+
+---
+
+## ⚡ Quick-Start Guide
+
+### Prerequisites
+- **Python**: 3.10 or higher
+- **uv**: Astral's Python package manager (`pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **Node.js**: 18+ and `npm`
+
+---
+
+### Step 1: Install Dependencies
 
 **Backend:**
 ```bash
@@ -32,56 +78,149 @@ npm install
 cd ..
 ```
 
-### 2. Configure API Key
+---
 
-Create a `.env` file in the project root:
+### Step 2: (Optional) Configure OpenRouter API Key
 
+Create a `.env` file in the root directory:
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+> **Note:** If `OPENROUTER_API_KEY` is not provided, the platform automatically switches to **offline mock council mode**, producing fully structured debates, JSON verdicts, and XAI justifications without external API calls.
 
-### 3. Configure Models (Optional)
+---
 
-Edit `backend/config.py` to customize the council:
+### Step 3: Run the Application Locally
 
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
+#### Option A: Run Servers Separately
 
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
-```
-
-## Running the Application
-
-**Option 1: Use the start script**
-```bash
-./start.sh
-```
-
-**Option 2: Run manually**
-
-Terminal 1 (Backend):
+**Terminal 1 — Backend (Port 8001):**
 ```bash
 uv run python -m backend.main
 ```
 
-Terminal 2 (Frontend):
+**Terminal 2 — Frontend (Port 5173):**
 ```bash
 cd frontend
 npm run dev
 ```
 
-Then open http://localhost:5173 in your browser.
+#### Option B: Use the Startup Script
 
-## Tech Stack
+On Linux/macOS or Git Bash / WSL:
+```bash
+chmod +x start.sh
+./start.sh
+```
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+---
+
+### Step 4: Access the Web Dashboard
+
+Open your browser and navigate to:
+```
+http://localhost:5173
+```
+
+- Select a benchmark preset (e.g. **Blocksworld Sussman**, **Gripper**, **Logistics**).
+- Click **Run Council Planning**.
+- Watch the 3 agents debate in real-time, view the Judge's selection, and inspect the verified plan steps.
+- Click **Telemetry** in the top navigation bar to review execution history.
+
+---
+
+## 🧪 Automated Testing & Verification
+
+Run the comprehensive end-to-end verification suite across all benchmarks:
+
+```bash
+uv run python tests/test_portfolio.py
+```
+
+This verifies:
+1. **Structural Analysis**: PDDL object, predicate, action, and goal extraction on all 6 benchmark files.
+2. **Classical Execution & Validation**: Optimal, Satisficing, and Agile planner runs and state-transition validation.
+3. **Council Deliberation & Judge Parsing**: 3-agent arguments, peer critique, and strict JSON verdict extraction.
+4. **End-to-End API Pipeline & Fallback**: Fast recovery under unachievable goals and SQLite telemetry recording.
+
+Other modular test suites:
+```bash
+uv run python tests/test_pddl_engine.py  # PDDL parser, planner wrapper & validator tests
+uv run python tests/test_council.py      # Multi-agent council deliberation tests
+uv run python tests/test_pipeline.py     # FastAPI solve-pddl route & fallback tests
+```
+
+---
+
+## 📡 API Reference
+
+### `POST /api/solve-pddl`
+Submits a domain and problem PDDL pair to the council and execution pipeline.
+
+**Request Body:**
+```json
+{
+  "domain_pddl": "(define (domain ...))",
+  "problem_pddl": "(define (problem ...))",
+  "user_constraints": {
+    "max_time": 30.0,
+    "force_strategy": null
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "metrics": {
+    "objects_count": 6,
+    "predicates_count": 3,
+    "actions_count": 3,
+    "goals_count": 2
+  },
+  "council": {
+    "stage1": [...],
+    "stage2": [...],
+    "stage3": {
+      "raw_text": "...",
+      "decision": {
+        "strategy": "satisficing",
+        "budget_seconds": 30.0,
+        "search_configuration": "lazy_greedy([ff()])",
+        "justification_summary": "Problem scale warrants fast heuristic search."
+      }
+    }
+  },
+  "execution": {
+    "success": true,
+    "plan": ["(pick ball1 rooma left)", "(move rooma roomb)", "(drop ball1 roomb left)"],
+    "execution_time": 0.012,
+    "planner_used": "pyperplan",
+    "final_strategy": "satisficing",
+    "fallback_triggered": false,
+    "fallback_history": []
+  },
+  "validation": {
+    "valid": true,
+    "cost": 3.0,
+    "validator_used": "state_transition_validator"
+  }
+}
+```
+
+### `GET /api/telemetry?limit=50`
+Returns historical planning runs stored in SQLite (`backend/telemetry.db`).
+
+### `GET /api/pddl-status`
+Returns planner and validator availability (Fast Downward, Pyperplan, VAL binary).
+
+---
+
+## 🛠 Tech Stack
+
+- **Backend**: Python 3.10+, FastAPI, Uvicorn, httpx, Pyperplan, SQLite (`aiosqlite`)
+- **Frontend**: React 19, Vite, Lucide Icons
+- **Package Management**: `uv` (Python), `npm` (JavaScript)
+- **Deliberation / LLM Layer**: OpenRouter API (Claude 3.5 Sonnet, GPT-4o, Gemini 1.5 Pro) with offline mock fallback
