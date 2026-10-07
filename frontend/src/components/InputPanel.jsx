@@ -61,6 +61,10 @@ export default function InputPanel({
     judge: 'Judge / Chairman',
   };
 
+  const resetModels = () => {
+    setSelectedModels(modelDefaults);
+  };
+
   const handlePresetSelect = (presetId) => {
     setSelectedPresetId(presetId);
     const preset = SAMPLE_PRESETS.find((p) => p.id === presetId);
@@ -123,55 +127,6 @@ export default function InputPanel({
               <span className="editor-subtext">(Types, Predicates, Actions)</span>
             </div>
 
-            <div className="model-selection-panel">
-              <div className="editor-header">
-                <span className="editor-title">Council Models</span>
-                <span className="editor-subtext">Separate role selectors with backend override support</span>
-              </div>
-              <input
-                className="model-search-input"
-                type="search"
-                value={modelSearch}
-                onChange={(e) => setModelSearch(e.target.value)}
-                placeholder="Search models by name, provider, or ID..."
-                disabled={isLoading || modelsLoading}
-              />
-              {modelsLoading && <p className="model-status">Loading OpenRouter models...</p>}
-              {modelError && <p className="model-status model-error">{modelError}</p>}
-              {!modelsLoading && !modelError && (
-                <div className="model-selectors-grid">
-                  {Object.entries(roleLabels).map(([role, label]) => (
-                    <label className="control-item" htmlFor={`model-${role}`} key={role}>
-                      <span className="control-label">{label}</span>
-                      <select
-                        id={`model-${role}`}
-                        className="control-select"
-                        value={selectedModels[role] || modelDefaults[role] || ''}
-                        onChange={(e) => setSelectedModels((current) => ({
-                          ...current,
-                          [role]: e.target.value,
-                        }))}
-                        disabled={isLoading || modelsLoading}
-                      >
-                        {[
-                          ...(
-                            selectedModels[role]
-                            && !filteredModels.some((model) => model.id === selectedModels[role])
-                            ? models.filter((model) => model.id === selectedModels[role])
-                            : []
-                          ),
-                          ...filteredModels,
-                        ].map((model) => (
-                          <option value={model.id} key={model.id}>
-                            {model.name} ({model.id})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
             <textarea
               className="pddl-textarea"
               value={domainPDDL}
@@ -201,6 +156,73 @@ export default function InputPanel({
               required
             />
           </div>
+        </div>
+
+        <div className="model-selection-panel">
+          <div className="model-panel-header">
+            <div className="editor-header">
+              <span className="editor-title">Council Models</span>
+              <span className="editor-subtext">Separate role selectors with backend override support</span>
+            </div>
+            {!modelsLoading && !modelError && (
+              <button type="button" className="model-reset-button" onClick={resetModels} disabled={isLoading}>
+                Reset defaults
+              </button>
+            )}
+          </div>
+          <div className="model-search-row">
+            <input
+              className="model-search-input"
+              type="search"
+              value={modelSearch}
+              onChange={(e) => setModelSearch(e.target.value)}
+              placeholder="Search models by name, provider, or ID..."
+              disabled={isLoading || modelsLoading}
+            />
+            {!modelsLoading && !modelError && (
+              <span className="model-result-count">{filteredModels.length} matching models</span>
+            )}
+          </div>
+          {modelsLoading && <p className="model-status">Loading OpenRouter models...</p>}
+          {modelError && <p className="model-status model-error">{modelError}</p>}
+          {!modelsLoading && !modelError && (
+            <div className="model-selectors-grid">
+              {Object.entries(roleLabels).map(([role, label]) => {
+                const selectedModelId = selectedModels[role] || modelDefaults[role] || '';
+                const roleModels = [
+                  ...(
+                    selectedModelId
+                    && !filteredModels.some((model) => model.id === selectedModelId)
+                      ? models.filter((model) => model.id === selectedModelId)
+                      : []
+                  ),
+                  ...filteredModels,
+                ];
+                return (
+                  <label className="control-item" htmlFor={`model-${role}`} key={role}>
+                    <span className="control-label">{label}</span>
+                    <select
+                      id={`model-${role}`}
+                      className="control-select"
+                      value={selectedModelId}
+                      onChange={(e) => setSelectedModels((current) => ({
+                        ...current,
+                        [role]: e.target.value,
+                      }))}
+                      disabled={isLoading || modelsLoading}
+                    >
+                      {roleModels.map((model) => (
+                        <option value={model.id} key={model.id}>
+                          {model.name} ({model.id})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="model-selected-id">{selectedModelId || 'No model selected'}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Controls & Action Bar */}
