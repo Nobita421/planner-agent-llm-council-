@@ -322,8 +322,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.model-panel-header,
-.model-search-row {
+.model-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -345,26 +344,138 @@
   color: #ffffff;
 }
 
-.model-search-input {
-  flex: 1;
+.model-role-picker {
+  position: relative;
+}
+
+.model-picker-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   background: #080d19;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: #f1f5f9;
-  padding: 9px 12px;
+  padding: 10px 12px;
   font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
 }
 
-.model-result-count {
-  color: var(--text-subtle);
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-.model-search-input:focus {
+.model-picker-trigger:focus,
+.model-role-picker.open .model-picker-trigger {
   outline: none;
   border-color: #38bdf8;
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+}
+
+.model-picker-selected {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-picker-selected strong,
+.model-picker-selected small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-selected small,
+.model-picker-chevron {
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+}
+
+.model-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 10px;
+  background: #101a2d;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+}
+
+.model-role-search {
+  width: 100%;
+  background: #080d19;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: #f1f5f9;
+  padding: 8px 10px;
+}
+
+.model-role-search:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+}
+
+.model-result-count {
+  display: block;
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  margin: 8px 2px;
+}
+
+.model-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.model-option-card {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  padding: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-option-card:hover,
+.model-option-card.selected {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.model-option-main,
+.model-option-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.model-option-main small,
+.model-option-meta small {
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+}
+
+.model-option-meta {
+  align-items: flex-end;
+}
+
+.model-option-meta em {
+  color: #86efac;
+  font-size: 0.68rem;
+  font-style: normal;
 }
 
 .model-selectors-grid {
@@ -447,14 +558,13 @@
 }
 
 @media (max-width: 760px) {
-  .model-panel-header,
-  .model-search-row {
+  .model-panel-header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .model-result-count {
-    white-space: normal;
+  .model-options {
+    position: static;
   }
 
   .model-selectors-grid {

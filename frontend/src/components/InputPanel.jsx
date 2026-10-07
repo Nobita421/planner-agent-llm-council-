@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SAMPLE_PRESETS } from '../presets';
 import { api } from '../api';
 
@@ -16,7 +16,8 @@ export default function InputPanel({
   const [models, setModels] = useState([]);
   const [modelDefaults, setModelDefaults] = useState({});
   const [selectedModels, setSelectedModels] = useState({});
-  const [modelSearch, setModelSearch] = useState('');
+  const [roleSearches, setRoleSearches] = useState({});
+  const [openRole, setOpenRole] = useState(null);
   const [modelError, setModelError] = useState(null);
   const [modelsLoading, setModelsLoading] = useState(true);
 
@@ -45,15 +46,6 @@ export default function InputPanel({
     };
   }, []);
 
-  const filteredModels = useMemo(() => {
-    const query = modelSearch.trim().toLowerCase();
-    return !query ? models : models.filter((model) => (
-      model.id.toLowerCase().includes(query)
-      || model.name.toLowerCase().includes(query)
-      || model.provider.toLowerCase().includes(query)
-    ));
-  }, [modelSearch, models]);
-
   const roleLabels = {
     optimal: 'Optimal Agent',
     satisficing: 'Satisficing Agent',
@@ -63,6 +55,40 @@ export default function InputPanel({
 
   const resetModels = () => {
     setSelectedModels(modelDefaults);
+    setOpenRole(null);
+  };
+
+  const getRoleModels = (role) => {
+    const query = (roleSearches[role] || '').trim().toLowerCase();
+    const matchingModels = !query ? models : models.filter((model) => (
+      model.id.toLowerCase().includes(query)
+      || model.name.toLowerCase().includes(query)
+      || model.provider.toLowerCase().includes(query)
+    ));
+    const selectedModelId = selectedModels[role] || modelDefaults[role] || '';
+    if (selectedModelId && !matchingModels.some((model) => model.id === selectedModelId)) {
+      return [
+        ...models.filter((model) => model.id === selectedModelId),
+        ...matchingModels,
+      ];
+    }
+    return matchingModels;
+  };
+
+  const getMatchingModelCount = (role) => {
+    const query = (roleSearches[role] || '').trim().toLowerCase();
+    if (!query) return models.length;
+    return models.filter((model) => (
+      model.id.toLowerCase().includes(query)
+      || model.name.toLowerCase().includes(query)
+      || model.provider.toLowerCase().includes(query)
+    )).length;
+  };
+
+  const getModelPricingLabel = (model) => {
+    const promptPrice = Number(model.pricing?.prompt);
+    const completionPrice = Number(model.pricing?.completion);
+    return promptPrice === 0 && completionPrice === 0 ? 'Free' : 'Paid';
   };
 
   const handlePresetSelect = (presetId) => {
@@ -170,55 +196,78 @@ export default function InputPanel({
               </button>
             )}
           </div>
-          <div className="model-search-row">
-            <input
-              className="model-search-input"
-              type="search"
-              value={modelSearch}
-              onChange={(e) => setModelSearch(e.target.value)}
-              placeholder="Search models by name, provider, or ID..."
-              disabled={isLoading || modelsLoading}
-            />
-            {!modelsLoading && !modelError && (
-              <span className="model-result-count">{filteredModels.length} matching models</span>
-            )}
-          </div>
           {modelsLoading && <p className="model-status">Loading OpenRouter models...</p>}
           {modelError && <p className="model-status model-error">{modelError}</p>}
           {!modelsLoading && !modelError && (
             <div className="model-selectors-grid">
               {Object.entries(roleLabels).map(([role, label]) => {
                 const selectedModelId = selectedModels[role] || modelDefaults[role] || '';
-                const roleModels = [
-                  ...(
-                    selectedModelId
-                    && !filteredModels.some((model) => model.id === selectedModelId)
-                      ? models.filter((model) => model.id === selectedModelId)
-                      : []
-                  ),
-                  ...filteredModels,
-                ];
+                const selectedModel = models.find((model) => model.id === selectedModelId);
+                const roleModels = getRoleModels(role);
+                const isOpen = openRole === role;
                 return (
-                  <label className="control-item" htmlFor={`model-${role}`} key={role}>
+                  <div className={`model-role-picker ${isOpen ? 'open' : ''}`} key={role}>
                     <span className="control-label">{label}</span>
-                    <select
-                      id={`model-${role}`}
-                      className="control-select"
-                      value={selectedModelId}
-                      onChange={(e) => setSelectedModels((current) => ({
-                        ...current,
-                        [role]: e.target.value,
-                      }))}
+                    <button
+                      type="button"
+                      className="model-picker-trigger"
+                      aria-expanded={isOpen}
+                      aria-controls={`model-options-${role}`}
+                      onClick={() => setOpenRole(isOpen ? null : role)}
                       disabled={isLoading || modelsLoading}
                     >
-                      {roleModels.map((model) => (
-                        <option value={model.id} key={model.id}>
-                          {model.name} ({model.id})
-                        </option>
-                      ))}
-                    </select>
-                    <span className="model-selected-id">{selectedModelId || 'No model selected'}</span>
-                  </label>
+                      <span className="model-picker-selected">
+                        <strong>{selectedModel?.name || selectedModelId || 'No model selected'}</strong>
+                        <small>{selectedModelId}</small>
+                      </span>
+                      <span aria-hidden="true" className="model-picker-chevron">{isOpen ? '▴' : '▾'}</span>
+                    </button>
+                    {isOpen && (
+                      <div className="model-options" id={`model-options-${role}`}>
+                        <input
+                          className="model-role-search"
+                          type="search"
+                          value={roleSearches[role] || ''}
+                          onChange={(e) => setRoleSearches((current) => ({
+                            ...current,
+                            [role]: e.target.value,
+                          }))}
+                          placeholder={`Search ${label} models...`}
+                          aria-label={`Search ${label} models`}
+                          autoFocus
+                        />
+                        <span className="model-result-count">
+                          {getMatchingModelCount(role) === 0
+                            ? 'No other models match; showing the selected model'
+                            : `${getMatchingModelCount(role)} matching models`}
+                        </span>
+                        <div className="model-options-list">
+                          {roleModels.length === 0 ? (
+                            <p className="model-status">No models match this search.</p>
+                          ) : roleModels.map((model) => (
+                            <button
+                              type="button"
+                              className={`model-option-card ${model.id === selectedModelId ? 'selected' : ''}`}
+                              key={model.id}
+                              onClick={() => {
+                                setSelectedModels((current) => ({ ...current, [role]: model.id }));
+                                setOpenRole(null);
+                              }}
+                            >
+                              <span className="model-option-main">
+                                <strong>{model.name}</strong>
+                                <small>{model.provider || 'Unknown provider'}</small>
+                              </span>
+                              <span className="model-option-meta">
+                                <small>{model.id}</small>
+                                <em>{getModelPricingLabel(model)}</em>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
