@@ -21,6 +21,7 @@ export default function App() {
   const [telemetryCount, setTelemetryCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState(null);
   const [planningStep, setPlanningStep] = useState(0);
+  const [liveStepDetail, setLiveStepDetail] = useState(null);
   const [planningElapsedSeconds, setPlanningElapsedSeconds] = useState(0);
 
   const planningSteps = [
@@ -60,15 +61,11 @@ export default function App() {
     const elapsedIntervalId = window.setInterval(() => {
       setPlanningElapsedSeconds((seconds) => seconds + 1);
     }, 1000);
-    const stepIntervalId = window.setInterval(() => {
-      setPlanningStep((currentStep) => Math.min(currentStep + 1, planningSteps.length - 1));
-    }, 5000);
 
     return () => {
       window.clearInterval(elapsedIntervalId);
-      window.clearInterval(stepIntervalId);
     };
-  }, [isLoading, planningSteps.length]);
+  }, [isLoading]);
 
   useEffect(() => {
     loadInitialStatus();
@@ -93,23 +90,38 @@ export default function App() {
   const handleRunPlanning = async (constraints) => {
     setIsLoading(true);
     setPlanningStep(0);
+    setLiveStepDetail(null);
     setPlanningElapsedSeconds(0);
     setErrorMessage(null);
 
     try {
-      const result = await api.solvePDDL(domainPDDL, problemPDDL, constraints);
-      setPlanningResult(result);
-      setTelemetryCount((prev) => prev + 1);
+      await api.solvePDDLStream(
+        domainPDDL,
+        problemPDDL,
+        constraints,
+        (stepIndex, detail) => {
+          setPlanningStep(stepIndex);
+          if (detail) setLiveStepDetail(detail);
+        },
+        (result) => {
+          setPlanningResult(result);
+          setTelemetryCount((prev) => prev + 1);
 
-      // Scroll smoothly down to results
-      setTimeout(() => {
-        const resultsEl = document.getElementById('planning-results-anchor');
-        if (resultsEl) {
-          resultsEl.scrollIntoView({ behavior: 'smooth' });
+          // Scroll smoothly down to results
+          setTimeout(() => {
+            const resultsEl = document.getElementById('planning-results-anchor');
+            if (resultsEl) {
+              resultsEl.scrollIntoView({ behavior: 'smooth' });
+            }
+          }, 100);
+        },
+        (err) => {
+          console.error('Planning pipeline error:', err);
+          setErrorMessage(err.message || 'An error occurred during planning deliberation.');
         }
-      }, 100);
+      );
     } catch (err) {
-      console.error('Planning pipeline error:', err);
+      console.error('Streaming connection error:', err);
       setErrorMessage(err.message || 'An error occurred during planning deliberation.');
     } finally {
       setIsLoading(false);
@@ -144,7 +156,7 @@ export default function App() {
                   <div>
                     <p className="planning-progress-eyebrow">Council planning in progress</p>
                     <h2>{planningSteps[planningStep].title}</h2>
-                    <p>{planningSteps[planningStep].detail}</p>
+                    <p>{liveStepDetail || planningSteps[planningStep].detail}</p>
                   </div>
                   <div className="planning-progress-status">
                     <span className="progress-spinner" aria-hidden="true" />

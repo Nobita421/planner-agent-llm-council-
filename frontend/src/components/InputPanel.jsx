@@ -110,8 +110,15 @@ export default function InputPanel({
     if (forceStrategy !== 'auto') {
       constraints.force_strategy = forceStrategy;
     }
-    if (Object.keys(selectedModels).length === 4) {
-      constraints.models = selectedModels;
+    const activeModels = {
+      optimal: selectedModels.optimal || modelDefaults.optimal,
+      satisficing: selectedModels.satisficing || modelDefaults.satisficing,
+      agile: selectedModels.agile || modelDefaults.agile,
+      judge: selectedModels.judge || modelDefaults.judge,
+    };
+    // Include models if any role is configured
+    if (activeModels.optimal && activeModels.satisficing && activeModels.agile && activeModels.judge) {
+      constraints.models = activeModels;
     }
 
     onRunPlanning(constraints);

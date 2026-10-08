@@ -3,6 +3,7 @@
 import asyncio
 import sys
 from pathlib import Path
+import pytest
 from httpx import AsyncClient, ASGITransport
 
 # Add project root to sys.path
@@ -69,6 +70,7 @@ SAMPLE_PROBLEM = """
 """
 
 
+@pytest.mark.asyncio
 async def test_status_endpoint():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -80,6 +82,7 @@ async def test_status_endpoint():
         assert data["mock_mode_available"] is True
 
 
+@pytest.mark.asyncio
 async def test_solve_pddl_pipeline_success():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -117,6 +120,7 @@ async def test_solve_pddl_pipeline_success():
         assert data["status"] in ("success", "fallback_success")
 
 
+@pytest.mark.asyncio
 async def test_solve_pddl_pipeline_fallback():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -143,6 +147,58 @@ async def test_solve_pddl_pipeline_fallback():
         assert len(data["execution"]["fallback_history"]) > 0
 
 
+@pytest.mark.asyncio
+async def test_solve_pddl_pipeline_stream():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        payload = {
+            "domain_pddl": SAMPLE_DOMAIN,
+            "problem_pddl": SAMPLE_PROBLEM,
+            "user_constraints": {
+                "max_time": 15,
+                "models": {
+                    "optimal": "openrouter/free",
+                    "satisficing": "openrouter/free",
+                    "agile": "openrouter/free",
+                    "judge": "openrouter/free",
+                },
+            },
+        }
+        async with client.stream("POST", "/api/solve-pddl/stream", json=payload) as resp:
+            assert resp.status_code == 200
+            import json
+            steps_received = []
+            complete_data = None
+            async for line in resp.aiter_lines():
+                if line.startswith("data:"):
+                    event = json.loads(line[5:].strip())
+                    if event.get("type") == "step":
+                        steps_received.append(event["step"])
+                    elif event.get("type") == "complete":
+                        complete_data = event.get("data")
+
+            # Check that intermediate steps 0, 1, 2, 3, 4, 5, 6 were emitted
+            assert 0 in steps_received
+            assert 1 in steps_received
+            assert 2 in steps_received
+            assert 3 in steps_received
+            assert 4 in steps_received
+            assert 5 in steps_received
+            assert 6 in steps_received
+
+            # Check complete payload
+            assert complete_data is not None
+            assert complete_data["validation"]["valid"] is True
+            assert len(complete_data["execution"]["plan"]) > 0
+
+            # Verify that custom models were respected across roles
+            stage1_models = {agent["role"]: agent["model"] for agent in complete_data["debate"]["stage1"]}
+            assert stage1_models["optimal"] == "openrouter/free"
+            assert stage1_models["satisficing"] == "openrouter/free"
+            assert stage1_models["agile"] == "openrouter/free"
+
+
+@pytest.mark.asyncio
 async def test_telemetry_endpoint():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -164,6 +220,8 @@ if __name__ == "__main__":
         await test_solve_pddl_pipeline_success()
         print("Testing /api/solve-pddl pipeline (fallback)...")
         await test_solve_pddl_pipeline_fallback()
+        print("Testing /api/solve-pddl/stream pipeline...")
+        await test_solve_pddl_pipeline_stream()
         print("Testing /api/telemetry...")
         await test_telemetry_endpoint()
         print("ALL PIPELINE INTEGRATION TESTS PASSED SUCCESSFULLY!")

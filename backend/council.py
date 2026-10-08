@@ -158,6 +158,8 @@ Your Task:
 3. Recommend specific planner search flags (e.g., Fast Downward 'astar(lmcut())' or 'astar(merge_and_shrink())').
 4. Propose a concrete CPU timeout budget in seconds (e.g., 30s, 60s, 120s, 300s).
 5. State clearly under what conditions optimal search guarantees minimal cost without risking combinatorial explosion.
+
+CRITICAL: Keep your response concise, sharp, and structured (under 200 words).
 """
 
     elif role_id == "satisficing":
@@ -171,6 +173,8 @@ Your Task:
 3. Recommend specific planner search flags (e.g., Fast Downward '--alias seq-sat-lama-2011' or 'lazy_greedy([ff()], preferred=[ff()])').
 4. Propose a concrete CPU timeout budget in seconds (e.g., 30s, 60s, 120s).
 5. Explain how multiple heuristics, preferred operators, or landmarks will guide the search around plateaus.
+
+CRITICAL: Keep your response concise, sharp, and structured (under 200 words).
 """
 
     else:  # agile
@@ -184,6 +188,8 @@ Your Task:
 3. Recommend specific agile planner search flags (e.g., Fast Downward 'lazy_greedy([ff()], preferred=[ff()])', unit-cost, 'bfs', or 'lama-first').
 4. Propose a tight CPU timeout budget in seconds (e.g., 10s, 15s, 30s).
 5. Warn against the danger of heavier heuristics exhausting time budgets before returning any executable plan.
+
+CRITICAL: Keep your response concise, sharp, and structured (under 200 words).
 """
 
 
@@ -289,23 +295,26 @@ async def stage1_collect_responses(
             {"role": "system", "content": f"You are the {role_cfg['name']}. {role_cfg['description']}"},
             {"role": "user", "content": prompt},
         ]
-        tasks.append(query_model(model, messages, timeout=60.0))
+        tasks.append(query_model(model, messages, timeout=25.0, max_tokens=500))
 
     raw_responses = await asyncio.gather(*tasks)
 
     stage1_results: List[Dict[str, Any]] = []
     for role_id, resp in zip(roles, raw_responses):
         role_cfg = PLANNING_COUNCIL_ROLES[role_id]
+        role_model = (role_models or {}).get(role_id, role_cfg["model"])
         if resp and resp.get("content"):
             content = resp["content"]
         else:
             # Fallback domain-aware reasoning if API unavailable
-            content = _generate_fallback_stage1(role_id, context)
+            err_msg = resp.get("error") if resp else "Request timed out or failed to connect"
+            fallback_text = _generate_fallback_stage1(role_id, context)
+            content = f"> ⚠️ **[Notice: Local Fallback Used]** LLM call for `{role_model}` failed ({err_msg}). Generated domain-aware algorithmic proposal:\n\n{fallback_text}"
 
         stage1_results.append({
             "role": role_id,
             "agent_name": role_cfg["name"],
-            "model": model,
+            "model": role_model,
             "response": content,
         })
 
@@ -347,9 +356,7 @@ YOUR TASK:
    - **Need for Plan Optimality**: Is cost minimisation strictly necessary, or does satisficing provide the better operational value?
    - **Timeout Budget Viability**: Is the proposed CPU budget realistic?
 2. Critique each response individually (strengths and potential failure modes).
-3. At the very end of your response, provide your definitive ranking of the proposals from best to worst.
-
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as:
+CRITICAL: Keep your critique concise (1-2 sentences per response). Your final ranking MUST be formatted EXACTLY as:
 FINAL RANKING:
 1. Response X
 2. Response Y
@@ -435,7 +442,7 @@ async def stage2_collect_rankings(
             {"role": "system", "content": f"You are the {PLANNING_COUNCIL_ROLES[role_id]['name']} reviewing peer proposals."},
             {"role": "user", "content": prompt},
         ]
-        tasks.append(query_model(model, messages, timeout=60.0))
+        tasks.append(query_model(model, messages, timeout=25.0, max_tokens=600))
 
     raw_responses = await asyncio.gather(*tasks)
 
@@ -555,12 +562,10 @@ STAGE 2 - Peer Critiques & Rankings:
 {stage2_text}
 
 YOUR VERDICT INSTRUCTIONS:
-1. Provide a comprehensive Explainable Decision (XAI) report:
-   - **Executive Analysis**: Characterize the state space scale, branching factor, and constraints.
-   - **Deliberation Assessment**: Weigh the Optimal, Satisficing, and Agile arguments. Identify key trade-offs and point out flaws in rejected proposals.
-   - **Verdict Rationale**: Give a clear human-readable justification citing specific problem properties (e.g., number of objects, predicates, goal count).
-2. Specify the exact planner configuration and timeout budget.
-3. AT THE VERY END OF YOUR RESPONSE, OUTPUT STRICTLY THE FOLLOWING JSON BLOCK (no trailing commentary):
+1. Provide a concise Explainable Decision (XAI) report (under 150 words):
+   - Weigh the Optimal, Satisficing, and Agile arguments citing specific problem properties.
+   - Specify the exact planner configuration and timeout budget.
+2. AT THE VERY END OF YOUR RESPONSE, OUTPUT STRICTLY THE FOLLOWING JSON BLOCK (no trailing commentary):
 ```json
 {{
   "strategy": "<optimal|satisficing|agile>",
@@ -660,12 +665,14 @@ async def stage3_synthesize_final(
     ]
 
     judge_model = (role_models or {}).get("judge", CHAIRMAN_MODEL)
-    response = await query_model(judge_model, messages, timeout=90.0)
+    response = await query_model(judge_model, messages, timeout=30.0, max_tokens=800)
 
     if response and response.get("content"):
         full_text = response["content"]
     else:
-        full_text = _generate_fallback_stage3(context, stage1_results, stage2_results)
+        err_msg = response.get("error") if response else "Request timed out or failed to connect"
+        fallback_text = _generate_fallback_stage3(context, stage1_results, stage2_results)
+        full_text = f"> ⚠️ **[Notice: Local Fallback Used]** LLM call for Chairman model `{judge_model}` failed ({err_msg}). Generated domain-aware synthesis:\n\n{fallback_text}"
 
     decision = parse_judge_decision(full_text)
 

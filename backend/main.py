@@ -88,12 +88,12 @@ async def resolve_role_models(user_constraints: Optional[Dict[str, Any]]) -> Opt
     try:
         catalog = await get_model_catalog()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Unable to load the OpenRouter model catalog.") from exc
+        raise HTTPException(status_code=502, detail="Unable to load the model catalog.") from exc
 
     available_ids = {model["id"] for model in catalog}
     invalid = sorted(set(overrides.values()) - available_ids)
     if invalid:
-        raise HTTPException(status_code=400, detail=f"Unknown OpenRouter model ID(s): {', '.join(invalid)}.")
+        raise HTTPException(status_code=400, detail=f"Unknown model ID(s): {', '.join(invalid)}.")
     return overrides
 
 
@@ -141,88 +141,81 @@ async def get_telemetry_history(limit: int = 50, problem_name: Optional[str] = N
 
 @app.get("/api/models")
 async def get_models():
-    """Return the searchable OpenRouter model catalog."""
+    """Return the searchable model catalog."""
+    from .openrouter import get_groq_api_key
+    groq_key = get_groq_api_key()
+    default_optimal = "groq/openai/gpt-oss-120b" if groq_key else PLANNING_COUNCIL_ROLES["optimal"]["model"]
+    default_satisficing = "groq/qwen/qwen3.8-27b" if groq_key else PLANNING_COUNCIL_ROLES["satisficing"]["model"]
+    default_agile = "groq/openai/gpt-oss-20b" if groq_key else PLANNING_COUNCIL_ROLES["agile"]["model"]
+    default_judge = "groq/openai/gpt-oss-120b" if groq_key else CHAIRMAN_MODEL
+
     try:
         return {
             "models": await get_model_catalog(),
             "defaults": {
-                "optimal": PLANNING_COUNCIL_ROLES["optimal"]["model"],
-                "satisficing": PLANNING_COUNCIL_ROLES["satisficing"]["model"],
-                "agile": PLANNING_COUNCIL_ROLES["agile"]["model"],
-                "judge": CHAIRMAN_MODEL,
+                "optimal": default_optimal,
+                "satisficing": default_satisficing,
+                "agile": default_agile,
+                "judge": default_judge,
             },
         }
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Unable to load the OpenRouter model catalog.") from exc
+        raise HTTPException(status_code=502, detail=f"Unable to load the model catalog: {exc}") from exc
 
 
-@app.post("/api/solve-pddl")
-async def solve_pddl_pipeline(request: SolvePDDLRequest):
-    """Full Orchestrator Pipeline for Explainable AI Planning:
-
-    Step 1 (Analysis): Extract structural metrics (objects, predicates, actions, goals, costs).
-    Step 2 (Council Debate): 3-stage deliberation (Optimal, Satisficing, Agile debate; Judge picks winning configuration).
-    Step 3 (Execution): Run classical planner with chosen strategy and budget.
-    Step 4 (Validation): Validate plan with VAL or state-transition engine.
-    Step 5 (Fallback Loop): If chosen planner fails, automatically fallback (optimal -> satisficing -> agile -> mock).
-    Step 6 (Explanation & Learning): Generate XAI summary, save full run metrics to SQLite telemetry.
-    Step 7: Return complete execution payload with debate transcripts, plan, and validation certificate.
-    """
-    if not request.domain_pddl.strip():
-        raise HTTPException(status_code=400, detail="Domain PDDL content cannot be empty.")
-    if not request.problem_pddl.strip():
-        raise HTTPException(status_code=400, detail="Problem PDDL content cannot be empty.")
-    role_models = await resolve_role_models(request.user_constraints)
-
-    # Step 1: Structural Analysis
-    metrics = extract_metrics(request.domain_pddl, request.problem_pddl)
+async def execute_planner_with_fallbacks(
+    domain_pddl: str,
+    problem_pddl: str,
+    decision: Dict[str, Any],
+    user_constraints: Optional[Dict[str, Any]],
+    metrics: Dict[str, Any],
+    stage1_results: List[Dict[str, Any]],
+    stage2_results: List[Dict[str, Any]],
+    stage3_result: Dict[str, Any],
+    aggregate_rankings: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Execute classical planner with fallback cascade and record telemetry."""
     problem_name = metrics.get("problem_name", "unknown")
     domain_name = metrics.get("domain_name", "unknown")
 
-    # Step 2: Council Debate
-    task_desc = f"Solve planning problem '{problem_name}' in domain '{domain_name}'."
-    stage1_results, stage2_results, stage3_result, council_meta = await run_full_council(
-        user_query=task_desc,
-        domain_text=request.domain_pddl,
-        problem_text=request.problem_pddl,
-        role_models=role_models,
-    )
-
-    decision = stage3_result.get("decision", {})
     initial_strategy = decision.get("strategy", "satisficing").lower()
     budget = float(decision.get("budget_seconds", 60.0))
     search_config = decision.get("search_configuration", "")
     judge_rationale = decision.get("justification_summary", "")
 
     # Respect optional user constraints
-    if request.user_constraints:
-        if "max_time" in request.user_constraints:
+    if user_constraints:
+        if "max_time" in user_constraints:
             try:
-                budget = min(budget, float(request.user_constraints["max_time"]))
+                budget = min(budget, float(user_constraints["max_time"]))
             except (ValueError, TypeError):
                 pass
-        if "force_strategy" in request.user_constraints:
-            forced = str(request.user_constraints["force_strategy"]).lower()
+        if "force_strategy" in user_constraints:
+            forced = str(user_constraints["force_strategy"]).lower()
             if forced in ("optimal", "satisficing", "agile"):
                 initial_strategy = forced
 
-    # Step 3 & 4: Initial Execution and Validation
+    # Cap initial optimal budget if Fast Downward is not installed on host to prevent Pyperplan freeze
+    if not find_fast_downward_binary() and initial_strategy == "optimal":
+        budget = min(budget, 15.0)
+
+    # Initial execution
     current_strategy = initial_strategy
     current_budget = budget
     fallback_triggered = False
     fallback_history: List[Dict[str, Any]] = []
 
     exec_res = run_planner(
-        domain=request.domain_pddl,
-        problem=request.problem_pddl,
+        domain=domain_pddl,
+        problem=problem_pddl,
         strategy=current_strategy,
         timeout=current_budget,
     )
 
     if exec_res.get("success") and exec_res.get("plan"):
         val_res = validate_plan(
-            domain=request.domain_pddl,
-            problem=request.problem_pddl,
+            domain=domain_pddl,
+            problem=problem_pddl,
             plan=exec_res["plan"],
             execution_time=exec_res.get("execution_time", 0.0),
         )
@@ -235,15 +228,15 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
             "error": exec_res.get("error", "Planner produced no plan."),
         }
 
-    # Step 5: Fallback Loop
+    # Fallback Loop
     strategy_ladder = {
         "optimal": "satisficing",
         "satisficing": "agile",
         "agile": "mock",
     }
     fallback_budgets = {
-        "satisficing": 60.0,
-        "agile": 20.0,
+        "satisficing": 15.0 if not find_fast_downward_binary() else 30.0,
+        "agile": 10.0,
         "mock": 5.0,
     }
 
@@ -260,12 +253,12 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
         })
 
         current_strategy = next_strategy
-        current_budget = fallback_budgets.get(current_strategy, 30.0)
+        current_budget = fallback_budgets.get(current_strategy, 15.0)
         is_mock = (current_strategy == "mock")
 
         exec_res = run_planner(
-            domain=request.domain_pddl,
-            problem=request.problem_pddl,
+            domain=domain_pddl,
+            problem=problem_pddl,
             strategy="agile" if is_mock else current_strategy,
             timeout=current_budget,
             mock=is_mock,
@@ -273,8 +266,8 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
 
         if exec_res.get("success") and exec_res.get("plan"):
             val_res = validate_plan(
-                domain=request.domain_pddl,
-                problem=request.problem_pddl,
+                domain=domain_pddl,
+                problem=problem_pddl,
                 plan=exec_res["plan"],
                 execution_time=exec_res.get("execution_time", 0.0),
             )
@@ -298,7 +291,7 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
     final_plan = exec_res.get("plan", [])
     total_time = sum(h.get("execution_time", 0.0) for h in fallback_history) + exec_res.get("execution_time", 0.0)
 
-    # Step 6: Explanation & Learning
+    # Explanation & Learning
     if val_res.get("valid"):
         if fallback_triggered:
             xai_summary = (
@@ -335,7 +328,6 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
         error=val_res.get("error"),
     )
 
-    # Step 7: Return Complete Execution Payload
     return {
         "status": "success" if (val_res.get("valid") and not fallback_triggered) else ("fallback_success" if val_res.get("valid") else "failed"),
         "problem_name": problem_name,
@@ -344,7 +336,7 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
         "debate": {
             "stage1": stage1_results,
             "stage2": stage2_results,
-            "aggregate_rankings": council_meta.get("aggregate_rankings", []),
+            "aggregate_rankings": aggregate_rankings,
             "judge_verdict": {
                 "response": stage3_result.get("response", ""),
                 "decision": decision,
@@ -371,6 +363,129 @@ async def solve_pddl_pipeline(request: SolvePDDLRequest):
         "xai_summary": xai_summary,
         "telemetry_id": telemetry_id,
     }
+
+
+@app.post("/api/solve-pddl")
+async def solve_pddl_pipeline(request: SolvePDDLRequest):
+    """Full Orchestrator Pipeline for Explainable AI Planning (Synchronous)."""
+    if not request.domain_pddl.strip():
+        raise HTTPException(status_code=400, detail="Domain PDDL content cannot be empty.")
+    if not request.problem_pddl.strip():
+        raise HTTPException(status_code=400, detail="Problem PDDL content cannot be empty.")
+    role_models = await resolve_role_models(request.user_constraints)
+
+    metrics = extract_metrics(request.domain_pddl, request.problem_pddl)
+    problem_name = metrics.get("problem_name", "unknown")
+    domain_name = metrics.get("domain_name", "unknown")
+
+    task_desc = f"Solve planning problem '{problem_name}' in domain '{domain_name}'."
+    stage1_results, stage2_results, stage3_result, council_meta = await run_full_council(
+        user_query=task_desc,
+        domain_text=request.domain_pddl,
+        problem_text=request.problem_pddl,
+        role_models=role_models,
+    )
+
+    decision = stage3_result.get("decision", {})
+    aggregate_rankings = council_meta.get("aggregate_rankings", [])
+
+    return await execute_planner_with_fallbacks(
+        domain_pddl=request.domain_pddl,
+        problem_pddl=request.problem_pddl,
+        decision=decision,
+        user_constraints=request.user_constraints,
+        metrics=metrics,
+        stage1_results=stage1_results,
+        stage2_results=stage2_results,
+        stage3_result=stage3_result,
+        aggregate_rankings=aggregate_rankings,
+    )
+
+
+@app.post("/api/solve-pddl/stream")
+async def solve_pddl_pipeline_stream(request: SolvePDDLRequest):
+    """Streaming Orchestrator Pipeline emitting real-time Server-Sent Events (SSE)."""
+    if not request.domain_pddl.strip():
+        raise HTTPException(status_code=400, detail="Domain PDDL content cannot be empty.")
+    if not request.problem_pddl.strip():
+        raise HTTPException(status_code=400, detail="Problem PDDL content cannot be empty.")
+
+    async def event_generator():
+        try:
+            # Step 0: Structural Analysis
+            yield f"data: {json.dumps({'type': 'step', 'step': 0, 'detail': 'Reading domain, objects, actions, and goals...'})}\n\n"
+            metrics = extract_metrics(request.domain_pddl, request.problem_pddl)
+            problem_name = metrics.get("problem_name", "unknown")
+            domain_name = metrics.get("domain_name", "unknown")
+
+            # Step 1: Preparing Council
+            yield f"data: {json.dumps({'type': 'step', 'step': 1, 'detail': 'Loading selected OpenRouter models and planning context...'})}\n\n"
+            role_models = await resolve_role_models(request.user_constraints)
+            task_desc = f"Solve planning problem '{problem_name}' in domain '{domain_name}'."
+
+            # Step 2: Stage 1 Strategy Proposals
+            yield f"data: {json.dumps({'type': 'step', 'step': 2, 'detail': 'Optimal, satisficing, and agile agents are analyzing the problem...'})}\n\n"
+            stage1_results = await stage1_collect_responses(
+                user_query=task_desc,
+                domain_text=request.domain_pddl,
+                problem_text=request.problem_pddl,
+                role_models=role_models,
+            )
+
+            # Step 3: Stage 2 Peer Review
+            yield f"data: {json.dumps({'type': 'step', 'step': 3, 'detail': 'Council agents are comparing and ranking the proposals...'})}\n\n"
+            stage2_results, label_to_model = await stage2_collect_rankings(
+                user_query=task_desc,
+                stage1_results=stage1_results,
+                domain_text=request.domain_pddl,
+                problem_text=request.problem_pddl,
+                role_models=role_models,
+            )
+            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+
+            # Step 4: Stage 3 Judge Synthesis
+            yield f"data: {json.dumps({'type': 'step', 'step': 4, 'detail': 'The chairman is selecting a planning strategy and time budget...'})}\n\n"
+            stage3_result = await stage3_synthesize_final(
+                user_query=task_desc,
+                stage1_results=stage1_results,
+                stage2_results=stage2_results,
+                domain_text=request.domain_pddl,
+                problem_text=request.problem_pddl,
+                role_models=role_models,
+            )
+            decision = stage3_result.get("decision", {})
+
+            # Step 5: Execution & Validation
+            strat_label = decision.get("strategy", "satisficing").upper()
+            yield f"data: {json.dumps({'type': 'step', 'step': 5, 'detail': f'Executing {strat_label} planner search and verifying action validity...'})}\n\n"
+            result_payload = await execute_planner_with_fallbacks(
+                domain_pddl=request.domain_pddl,
+                problem_pddl=request.problem_pddl,
+                decision=decision,
+                user_constraints=request.user_constraints,
+                metrics=metrics,
+                stage1_results=stage1_results,
+                stage2_results=stage2_results,
+                stage3_result=stage3_result,
+                aggregate_rankings=aggregate_rankings,
+            )
+
+            # Step 6: Finalizing
+            yield f"data: {json.dumps({'type': 'step', 'step': 6, 'detail': 'Packaging the plan, debate, validation, and telemetry results...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'data': result_payload})}\n\n"
+
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -513,4 +628,4 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8001, reload=True)

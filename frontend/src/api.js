@@ -50,6 +50,87 @@ export const api = {
   },
 
   /**
+   * Run full AEPP Planning Pipeline with real-time SSE progress streaming:
+   * Analysis -> Stage 1 Proposals -> Stage 2 Peer Review -> Stage 3 Judge Verdict -> Execution -> Validation -> Telemetry.
+   */
+  async solvePDDLStream(domainPDDL, problemPDDL, userConstraints = null, onStep = () => {}, onComplete = () => {}, onError = () => {}) {
+    const response = await fetch(`${API_BASE}/api/solve-pddl/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        domain_pddl: domainPDDL,
+        problem_pddl: problemPDDL,
+        user_constraints: userConstraints,
+      }),
+    });
+
+    if (response.status === 404) {
+      // Backend server was running an older process without reload; gracefully fallback to /api/solve-pddl
+      console.warn('/api/solve-pddl/stream returned 404; falling back to /api/solve-pddl');
+      onStep(2, 'Running full council planning deliberation...');
+      try {
+        const result = await this.solvePDDL(domainPDDL, problemPDDL, userConstraints);
+        onComplete(result);
+        return result;
+      } catch (fallbackErr) {
+        onError(fallbackErr);
+        throw fallbackErr;
+      }
+    }
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const errorMsg = errData.detail || 'Failed to start streaming planning pipeline';
+      const err = new Error(errorMsg);
+      onError(err);
+      throw err;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data:')) {
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr) continue;
+            try {
+              const event = JSON.parse(jsonStr);
+              if (event.type === 'step') {
+                onStep(event.step, event.detail);
+              } else if (event.type === 'complete') {
+                onComplete(event.data);
+                return event.data;
+              } else if (event.type === 'error') {
+                const err = new Error(event.message || 'Error occurred during streaming planning');
+                onError(err);
+                throw err;
+              }
+            } catch (parseErr) {
+              console.warn('Failed to parse SSE chunk:', jsonStr, parseErr);
+            }
+          }
+        }
+      }
+    } catch (streamErr) {
+      onError(streamErr);
+      throw streamErr;
+    }
+  },
+
+  /**
    * Retrieve historical planning telemetry records.
    */
   async getTelemetry(limit = 50, problemName = null) {

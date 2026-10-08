@@ -8,6 +8,17 @@ load_dotenv()
 # OpenRouter API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# Groq API configuration (Free tier with 1,000-14,400 req/day and ultra-fast inference)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+
+# Default role models: Prioritize verified active Groq models if key is configured, else fallback
+DEFAULT_OPTIMAL = "groq/openai/gpt-oss-120b" if GROQ_API_KEY else "nvidia/nemotron-3.5-lightning:free"
+DEFAULT_SATISFICING = "groq/qwen/qwen3.8-27b" if GROQ_API_KEY else "openrouter/free"
+DEFAULT_AGILE = "groq/openai/gpt-oss-20b" if GROQ_API_KEY else "nvidia/nemotron-3.5-lightning:free"
+DEFAULT_CHAIRMAN = "groq/openai/gpt-oss-120b" if GROQ_API_KEY else "openrouter/free"
+
 # Specialized Council Agent Roles for Classical & Explainable AI Planning
 PLANNING_COUNCIL_ROLES = {
     "optimal": {
@@ -19,7 +30,7 @@ PLANNING_COUNCIL_ROLES = {
             "lower-bound estimates, and detects whether problem state space permits optimal "
             "search within memory/time bounds."
         ),
-        "model": os.getenv("OPTIMAL_AGENT_MODEL", "nvidia/nemotron-3.5-lightning:free"),
+        "model": os.getenv("OPTIMAL_AGENT_MODEL", DEFAULT_OPTIMAL),
         "preferred_heuristics": ["lmcut", "merge_and_shrink", "blind"],
         "default_budget": 120,
     },
@@ -31,7 +42,7 @@ PLANNING_COUNCIL_ROLES = {
             "Specializes in heuristic search trade-offs, LAMA, multi-heuristic search, "
             "goal count relaxation, and balancing plan cost vs runtime."
         ),
-        "model": os.getenv("SATISFICING_AGENT_MODEL", "openrouter/free"),
+        "model": os.getenv("SATISFICING_AGENT_MODEL", DEFAULT_SATISFICING),
         "preferred_heuristics": ["lama", "hff", "cea", "hadd"],
         "default_budget": 60,
     },
@@ -43,7 +54,7 @@ PLANNING_COUNCIL_ROLES = {
             "Specializes in fast first-plan discovery, satisfiability under tight deadlines, "
             "greedy search, and emergency plan synthesis."
         ),
-        "model": os.getenv("AGILE_AGENT_MODEL", "nvidia/nemotron-3.5-lightning:free"),
+        "model": os.getenv("AGILE_AGENT_MODEL", DEFAULT_AGILE),
         "preferred_heuristics": ["lazy_greedy", "bfs", "unit_cost"],
         "default_budget": 15,
     },
@@ -57,7 +68,7 @@ JUDGE_ROLE = {
         "The chairman that evaluates the three arguments based on problem characteristics "
         "(objects, predicates, branching factor) and makes the final planner strategy choice."
     ),
-    "model": os.getenv("CHAIRMAN_MODEL", "openrouter/free"),
+    "model": os.getenv("CHAIRMAN_MODEL", DEFAULT_CHAIRMAN),
 }
 
 # Council models list for backwards compatibility
