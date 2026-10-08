@@ -20,6 +20,55 @@ export default function App() {
   const [planningResult, setPlanningResult] = useState(null);
   const [telemetryCount, setTelemetryCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [planningStep, setPlanningStep] = useState(0);
+  const [planningElapsedSeconds, setPlanningElapsedSeconds] = useState(0);
+
+  const planningSteps = [
+    {
+      title: 'Checking your PDDL problem',
+      detail: 'Reading the domain, objects, actions, and goals.',
+    },
+    {
+      title: 'Preparing the council',
+      detail: 'Loading the selected OpenRouter models and planning context.',
+    },
+    {
+      title: 'Collecting strategy proposals',
+      detail: 'Optimal, satisficing, and agile agents are analyzing the problem.',
+    },
+    {
+      title: 'Running anonymous peer review',
+      detail: 'Council agents are comparing and ranking the proposals.',
+    },
+    {
+      title: 'Judge is synthesizing a decision',
+      detail: 'The chairman is selecting a planning strategy and time budget.',
+    },
+    {
+      title: 'Executing and validating the plan',
+      detail: 'The classical planner is searching, then checking every action.',
+    },
+    {
+      title: 'Finalizing the explanation',
+      detail: 'Packaging the plan, debate, validation, and telemetry results.',
+    },
+  ];
+
+  useEffect(() => {
+    if (!isLoading) return undefined;
+
+    const elapsedIntervalId = window.setInterval(() => {
+      setPlanningElapsedSeconds((seconds) => seconds + 1);
+    }, 1000);
+    const stepIntervalId = window.setInterval(() => {
+      setPlanningStep((currentStep) => Math.min(currentStep + 1, planningSteps.length - 1));
+    }, 5000);
+
+    return () => {
+      window.clearInterval(elapsedIntervalId);
+      window.clearInterval(stepIntervalId);
+    };
+  }, [isLoading, planningSteps.length]);
 
   useEffect(() => {
     loadInitialStatus();
@@ -43,6 +92,8 @@ export default function App() {
 
   const handleRunPlanning = async (constraints) => {
     setIsLoading(true);
+    setPlanningStep(0);
+    setPlanningElapsedSeconds(0);
     setErrorMessage(null);
 
     try {
@@ -86,6 +137,39 @@ export default function App() {
               onRunPlanning={handleRunPlanning}
               isLoading={isLoading}
             />
+
+            {isLoading && (
+              <section className="planning-progress-panel" aria-live="polite" aria-label="Planning progress">
+                <div className="planning-progress-header">
+                  <div>
+                    <p className="planning-progress-eyebrow">Council planning in progress</p>
+                    <h2>{planningSteps[planningStep].title}</h2>
+                    <p>{planningSteps[planningStep].detail}</p>
+                  </div>
+                  <div className="planning-progress-status">
+                    <span className="progress-spinner" aria-hidden="true" />
+                    <strong>Working</strong>
+                    <span>{planningElapsedSeconds}s elapsed</span>
+                  </div>
+                </div>
+                <ol className="planning-progress-steps">
+                  {planningSteps.map((step, index) => (
+                    <li
+                      className={index < planningStep ? 'complete' : index === planningStep ? 'active' : ''}
+                      key={step.title}
+                    >
+                      <span className="planning-step-marker" aria-hidden="true">
+                        {index < planningStep ? '✓' : index + 1}
+                      </span>
+                      <span>{step.title}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="planning-progress-note">
+                  This may take a little while because several agents and the planner are working in sequence.
+                </p>
+              </section>
+            )}
 
             {/* Error Notification */}
             {errorMessage && (
